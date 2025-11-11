@@ -1,0 +1,6 @@
+[
+  {"name": "Perplexity AI", "desc": "Research-grade answers with citations.", "link": "https://www.perplexity.ai"},
+  {"name": "Notion AI", "desc": "Draft, summarise, and automate docs inside Notion.", "link": "https://www.notion.so/product/ai"},
+  {"name": "OpenRouter Playground", "desc": "Try many LLMs in one place.", "link": "https://openrouter.ai/playground"},
+  {"name": "Cursor IDE", "desc": "AI-native coding editor for faster dev.", "link": "https://www.cursor.com"}
+]
