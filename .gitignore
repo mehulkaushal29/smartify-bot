@@ -1,19 +1,4 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Virtual env
 .venv/
-venv/
-
-# Env files
+__pycache__/
+*.pyc
 .env
-.env.*
-!.env.example
-
-# macOS
-.DS_Store
-
-# Local DB / cache
-users_db.json
