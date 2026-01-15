@@ -1,6 +1,6 @@
 WELCOME = (
     "👋 <b>Welcome to Smartify Jobs!</b>\n\n"
-    "🌍 Get worldwide job listings tailored to your profession.\n"
+    "🌍 <b>Jobs from ANY country. For ANY profession.</b>\n"
     "💼 Example roles: developer, data engineer, python developer, product manager, designer, etc.\n\n"
     "💻 <b>Commands:</b>\n"
     "• /jobs &lt;keyword&gt; [country_code] [loc=City] – search jobs worldwide.\n"
