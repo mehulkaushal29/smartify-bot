@@ -1,25 +1,35 @@
 WELCOME = (
-    "👋 <b>Welcome to Smartify Jobs!</b>\n\n"
-    "🌍 <b>Jobs from ANY country. For ANY profession.</b>\n"
-    "💼 Example roles: developer, data engineer, python developer, product manager, designer, etc.\n\n"
-    "💻 <b>Commands:</b>\n"
-    "• /jobs &lt;keyword&gt; [country_code] [loc=City] – search jobs worldwide.\n"
-    "• /jobs_au – top Australian jobs.\n"
-    "• /jobs_in – top Indian jobs.\n"
-    "• /aitools – latest AI tools.\n"
-    "• /both – jobs + AI tools.\n"
-    "• /subscribe – choose daily topics you want.\n"
-    "• /unsubscribe – stop all daily messages.\n"
-    "• /prefs – view your current preferences.\n"
-    "• /settz &lt;Timezone&gt; – set your timezone.\n"
-    "• /pushnow – trigger an immediate push.\n\n"
-    "💬 Tip: Send your role and country (e.g. <code>python au</code>) for personalised results.\n\n"
-    "🚀 <b>Why join?</b>\n"
-    "⏱️ Daily curated job listings for your profession.\n"
-    "🤖 AI-tool updates to boost your workflow.\n"
-    "🔎 On-demand search right in the chat.\n"
-    "✅ Simple subscription – pick what you want and get a daily DM.\n"
+    "👋 <b>Welcome to Smartify Jobs 🚀</b>\n\n"
+    "Looking for your next job?\n"
+    "Smartify brings you <b>fresh job opportunities</b> from <b>any country</b>, "
+    "tailored to <b>your profession</b> — straight to Telegram.\n\n"
+
+    "🔎 <b>Just type what you want</b>\n"
+    "No setup, no forms:\n"
+    "• <i>python developer au</i>\n"
+    "• <i>data analyst us</i>\n"
+    "• <i>nurse uk</i>\n\n"
+
+    "⚡ <b>What you get</b>\n"
+    "✅ Jobs matched to your role\n"
+    "✅ Multiple countries supported\n"
+    "✅ Clean, easy-to-read results\n"
+    "✅ Optional AI tools to boost your career\n\n"
+
+    "🔔 <b>Why subscribe?</b>\n"
+    "Get a <b>daily job shortlist at 9 AM</b> — no spam, only what you choose.\n\n"
+
+    "📌 <b>Quick commands</b>\n"
+    "• /subscribe – daily job alerts\n"
+    "• /jobs – search manually\n"
+    "• /setrole – save your role\n"
+    "• /prefs – manage settings\n"
+    "• /aitools – trending AI tools\n\n"
+
+    "👇 <b>Start now</b>\n"
+    "Type your role & country or tap <b>Subscribe</b> below."
 )
+
 
 
 def format_jobs(jobs: list, max_items: int = 10) -> str:
