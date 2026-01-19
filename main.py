@@ -27,7 +27,6 @@ logger = logging.getLogger("smartify")
 
 def parse_free_text(text: str):
     """
-    Extract keyword + location from free text.
     Examples:
     - admin jobs in scotland
     - nurse california
@@ -35,27 +34,23 @@ def parse_free_text(text: str):
     """
     text = (text or "").lower().strip()
 
-    # remove filler words
     text = re.sub(r"\b(jobs?|roles?|vacancies?|openings?)\b", "", text)
     text = re.sub(r"\bin\b", "", text)
-
-    # clean spaces
     text = re.sub(r"\s+", " ", text).strip()
 
-    tokens = text.split()
+    parts = text.split()
 
-    if len(tokens) >= 2:
-        keyword = " ".join(tokens[:-1]).strip()
-        location = tokens[-1].strip()
+    if len(parts) >= 2:
+        keyword = " ".join(parts[:-1])
+        location = parts[-1]
     else:
-        keyword = text.strip()
+        keyword = text
         location = None
 
-    # fallback
     if not keyword:
         keyword = "jobs"
 
-    return keyword, location
+    return keyword.strip(), location
 
 
 # ----------------- KEYBOARD -----------------
@@ -69,7 +64,7 @@ def subscribe_keyboard():
 # ----------------- ERROR HANDLER -----------------
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.exception("Unhandled exception while processing update", exc_info=context.error)
+    logger.exception("Unhandled exception", exc_info=context.error)
 
 
 # ----------------- COMMANDS -----------------
@@ -77,6 +72,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     upsert_user(user_id)
+
     await update.message.reply_text(
         WELCOME,
         parse_mode=ParseMode.HTML,
@@ -86,7 +82,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def text_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Guard: only proceed if we truly have a message text
     if not update.message or not update.message.text:
         return
 
@@ -95,10 +90,13 @@ async def text_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyword, location = parse_free_text(text)
 
-    # ✅ Save last search for daily push
-    upsert_user(user_id, last_keyword=keyword, last_location=location)
+    # Save last search (for daily push)
+    upsert_user(
+        user_id,
+        last_keyword=keyword,
+        last_location=location
+    )
 
-    # ✅ Jooble/Jobs API call
     results = get_jobs(keyword=keyword, location=location)
 
     header = f"🔎 <b>Jobs for “{keyword}”</b>"
@@ -106,12 +104,13 @@ async def text_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         header += f" — <b>{location.title()}</b>"
 
     if not results:
-        return await update.message.reply_text(
+        await update.message.reply_text(
             header + "\n\nNo results found.",
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
             reply_markup=subscribe_keyboard(),
         )
+        return
 
     await update.message.reply_text(
         header + "\n\n" + format_jobs(results),
@@ -122,24 +121,22 @@ async def text_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def subscribe_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    ✅ Button-click subscribe (CallbackQuery)
-    """
     query = update.callback_query
     await query.answer()
 
     user_id = query.from_user.id
     upsert_user(user_id, subscribed=True)
 
-    # Edit the original bot message (best UX)
-    await query.edit_message_reply_markup(reply_markup=None)
+    # Try editing button away (safe)
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
     await query.message.reply_text("✅ You’re subscribed for daily updates!")
 
 
 async def subscribe_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Optional: /subscribe command
-    """
     user_id = update.effective_user.id
     upsert_user(user_id, subscribed=True)
     await update.message.reply_text("✅ You’re subscribed for daily updates!")
@@ -174,7 +171,7 @@ async def push_daily_job(context: ContextTypes.DEFAULT_TYPE):
                 disable_web_page_preview=True,
             )
         except Exception as e:
-            logger.warning(f"Failed to push to {uid}: {e}")
+            logger.warning(f"Daily push failed for {uid}: {e}")
 
 
 async def on_startup(app):
@@ -191,28 +188,22 @@ async def on_startup(app):
 
 def run():
     if not TELEGRAM_BOT_TOKEN:
-        raise SystemExit("TELEGRAM_BOT_TOKEN missing.")
+        raise SystemExit("TELEGRAM_BOT_TOKEN missing")
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Error handler (so Railway shows real exceptions)
     app.add_error_handler(error_handler)
 
-    # Commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("subscribe", subscribe_cmd))
-
-    # Button click subscribe
     app.add_handler(CallbackQueryHandler(subscribe_cb, pattern=r"^subscribe$"))
 
-    # ✅ Only private chat free-text searches
     app.add_handler(
         MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, text_search)
     )
 
     app.post_init = on_startup
 
-    # ✅ Only accept what you handle
     app.run_polling(
         drop_pending_updates=True,
         allowed_updates=["message", "callback_query"],
