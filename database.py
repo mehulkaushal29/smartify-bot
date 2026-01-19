@@ -7,7 +7,6 @@ users = db.table("users")
 
 DEFAULT_PREFS = {"jobs_au": False, "jobs_in": False, "ai_tools": False}
 
-
 def get_user(user_id: int) -> dict:
     q = Query()
     row = users.get(q.user_id == user_id)
@@ -16,25 +15,25 @@ def get_user(user_id: int) -> dict:
         "user_id": user_id,
         "prefs": DEFAULT_PREFS.copy(),
         "tz": "Australia/Melbourne",
-        # ✅ new fields (safe defaults)
         "subscribed": False,
-        "last_keyword": None,
+        "last_keyword": "jobs",
         "last_location": None,
     }
 
     if not row:
         return base
 
-    # merge prefs
-    merged_prefs = DEFAULT_PREFS.copy()
-    merged_prefs.update(row.get("prefs", {}) or {})
+    # merge prefs safely
+    prefs = DEFAULT_PREFS.copy()
+    prefs.update(row.get("prefs", {}) or {})
 
-    base.update(row)  # bring any stored fields
-    base["prefs"] = merged_prefs
-    base["tz"] = row.get("tz", "Australia/Melbourne")
-    base["subscribed"] = bool(row.get("subscribed", False))
-    base["last_keyword"] = row.get("last_keyword")
-    base["last_location"] = row.get("last_location")
+    base.update({
+        "prefs": prefs,
+        "tz": row.get("tz", base["tz"]),
+        "subscribed": row.get("subscribed", base["subscribed"]),
+        "last_keyword": row.get("last_keyword", base["last_keyword"]),
+        "last_location": row.get("last_location", base["last_location"]),
+    })
 
     return base
 
@@ -46,67 +45,44 @@ def upsert_user(
     subscribed: Optional[bool] = None,
     last_keyword: Optional[str] = None,
     last_location: Optional[str] = None,
-    **extra: Any,
 ):
-    """
-    ✅ Backwards compatible:
-    - You can still call: upsert_user(user_id, prefs=..., tz=...)
-    ✅ New capabilities:
-    - upsert_user(user_id, subscribed=True)
-    - upsert_user(user_id, last_keyword="nurse", last_location="india")
-    - Stores any extra keyword fields via **extra
-    """
     q = Query()
     row = users.get(q.user_id == user_id)
 
-    # build patch update object
-    patch: Dict[str, Any] = {}
-
-    # prefs merge
-    if prefs is not None:
-        existing_prefs = (row.get("prefs", {}) if row else {}) or {}
-        new_prefs = existing_prefs.copy()
-        new_prefs.update(prefs)
-        patch["prefs"] = new_prefs
-
-    # tz update
-    if tz is not None:
-        patch["tz"] = tz
-    elif not row:
-        patch["tz"] = "Australia/Melbourne"
-
-    # new fields
-    if subscribed is not None:
-        patch["subscribed"] = bool(subscribed)
-
-    if last_keyword is not None:
-        patch["last_keyword"] = last_keyword
-
-    if last_location is not None:
-        patch["last_location"] = last_location
-
-    # allow future expansion
-    if extra:
-        patch.update(extra)
-
     if row:
-        if patch:
-            users.update(patch, q.user_id == user_id)
+        update_doc: Dict[str, Any] = {}
+
+        # prefs merge
+        if prefs is not None:
+            new_prefs = (row.get("prefs") or {}).copy()
+            new_prefs.update(prefs)
+            update_doc["prefs"] = new_prefs
+
+        if tz is not None:
+            update_doc["tz"] = tz
+
+        if subscribed is not None:
+            update_doc["subscribed"] = subscribed
+
+        if last_keyword is not None:
+            update_doc["last_keyword"] = last_keyword
+
+        if last_location is not None:
+            update_doc["last_location"] = last_location
+
+        if update_doc:
+            users.update(update_doc, q.user_id == user_id)
+
     else:
-        # create new record with defaults
-        record = {
+        users.insert({
             "user_id": user_id,
-            "prefs": DEFAULT_PREFS.copy(),
-            "tz": "Australia/Melbourne",
-            "subscribed": False,
-            "last_keyword": None,
-            "last_location": None,
-        }
-        # apply any initial patch values
-        record.update(patch)
-        users.insert(record)
+            "prefs": prefs or DEFAULT_PREFS.copy(),
+            "tz": tz or "Australia/Melbourne",
+            "subscribed": bool(subscribed) if subscribed is not None else False,
+            "last_keyword": last_keyword or "jobs",
+            "last_location": last_location,
+        })
 
 
 def all_users():
-    # ✅ FIX: remove trailing comma so this returns a list, not a tuple
     return users.all()
