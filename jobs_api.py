@@ -1,47 +1,55 @@
 import requests
 from typing import List, Dict
-from config import ADZUNA_APP_ID, ADZUNA_APP_KEY, RESULTS_PER_PAGE
+from config import JOOBLE_API_KEY, RESULTS_PER_PAGE
 
-COUNTRY_MAP = {"AU": "au", "IN": "in"}
+JOOBLE_URL = "https://jooble.org/api/"
 
-def _adzuna_call(keyword: str, cc: str, location: str = None, page: int = 1) -> dict:
-    url = f"https://api.adzuna.com/v1/api/jobs/{cc}/search/{page}"
-    params = {
-        "app_id": ADZUNA_APP_ID,
-        "app_key": ADZUNA_APP_KEY,
-        "results_per_page": RESULTS_PER_PAGE,
-        "what": keyword,
-        "sort_by": "date",  # newest first
-    }
-    if location:
-        params["where"] = location
-    r = requests.get(url, params=params, timeout=12)
-    r.raise_for_status()
-    return r.json()
 
-def get_jobs(keyword: str, country_code: str, location: str = None) -> List[Dict]:
-    if not ADZUNA_APP_ID or not ADZUNA_APP_KEY:
+def get_jobs(keyword: str, country: str = "", location: str = "") -> List[Dict]:
+    """
+    Fetch jobs from Jooble API.
+    - keyword: job title / profession (free text)
+    - country: country name or code (optional)
+    - location: city/state (optional)
+    """
+
+    if not JOOBLE_API_KEY:
         return []
-    cc = COUNTRY_MAP.get(country_code.upper(), "au")
 
-    jobs: List[Dict] = []
+    # 🔹 Build smart search text
+    search_text = keyword.strip()
+
+    if location:
+        search_text += f" in {location}"
+
+    if country:
+        search_text += f" {country}"
+
+    payload = {
+        "keywords": search_text,
+        "page": 1,
+        "searchMode": 1,
+    }
+
     try:
-        # Try page 1
-        data = _adzuna_call(keyword, cc, location, page=1)
-        results = data.get("results", [])
-        # If empty, try page 2 as a light fallback
-        if not results:
-            data2 = _adzuna_call(keyword, cc, location, page=2)
-            results = data2.get("results", [])
-
-        for j in results:
-            jobs.append({
-                "title": j.get("title", "(no title)"),
-                "company": (j.get("company") or {}).get("display_name", "(unknown)"),
-                "link": j.get("redirect_url", ""),
-                "location": (j.get("location") or {}).get("display_name", ""),
-            })
+        response = requests.post(
+            f"{JOOBLE_URL}{JOOBLE_API_KEY}",
+            json=payload,
+            timeout=15
+        )
+        response.raise_for_status()
+        data = response.json()
     except Exception:
         return []
+
+    jobs: List[Dict] = []
+
+    for job in data.get("jobs", [])[:RESULTS_PER_PAGE]:
+        jobs.append({
+            "title": job.get("title", "(no title)"),
+            "company": job.get("company", "(unknown)"),
+            "location": job.get("location", ""),
+            "link": job.get("link", ""),
+        })
 
     return jobs
