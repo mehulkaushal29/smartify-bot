@@ -2,30 +2,20 @@ import requests
 from typing import List, Dict
 from config import JOOBLE_API_KEY, RESULTS_PER_PAGE
 
-
 JOOBLE_URL = "https://jooble.org/api/"
 
-
-def get_jobs(keyword: str, country_or_location: str, location: str = None) -> List[Dict]:
-    """
-    Jooble search:
-    - keyword = job title / role
-    - location = COUNTRY or STATE or CITY (mandatory for accurate results)
-    """
-
+def get_jobs(keyword: str, location: str = None) -> List[Dict]:
     if not JOOBLE_API_KEY:
         return []
 
-    # 🔥 CRITICAL FIX:
-    # If user typed "india", "usa", "scotland" → force it as LOCATION
-    search_location = location or country_or_location
-
     payload = {
         "keywords": keyword,
-        "location": search_location,
         "page": 1,
-        "pageSize": RESULTS_PER_PAGE,
+        "searchMode": 1,
     }
+
+    if location:
+        payload["location"] = location
 
     try:
         r = requests.post(
@@ -35,18 +25,16 @@ def get_jobs(keyword: str, country_or_location: str, location: str = None) -> Li
         )
         r.raise_for_status()
         data = r.json()
-
-        jobs = []
-        for j in data.get("jobs", []):
-            jobs.append({
-                "title": j.get("title", "No title"),
-                "company": j.get("company", "Unknown"),
-                "location": j.get("location", ""),
-                "link": j.get("link", ""),
-            })
-
-        return jobs
-
-    except Exception as e:
-        print("Jooble error:", e)
+    except Exception:
         return []
+
+    jobs = []
+    for j in data.get("jobs", [])[:RESULTS_PER_PAGE]:
+        jobs.append({
+            "title": j.get("title", ""),
+            "company": j.get("company", ""),
+            "location": j.get("location", ""),
+            "link": j.get("link", ""),
+        })
+
+    return jobs
