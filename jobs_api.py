@@ -2,54 +2,51 @@ import requests
 from typing import List, Dict
 from config import JOOBLE_API_KEY, RESULTS_PER_PAGE
 
+
 JOOBLE_URL = "https://jooble.org/api/"
 
 
-def get_jobs(keyword: str, country: str = "", location: str = "") -> List[Dict]:
+def get_jobs(keyword: str, country_or_location: str, location: str = None) -> List[Dict]:
     """
-    Fetch jobs from Jooble API.
-    - keyword: job title / profession (free text)
-    - country: country name or code (optional)
-    - location: city/state (optional)
+    Jooble search:
+    - keyword = job title / role
+    - location = COUNTRY or STATE or CITY (mandatory for accurate results)
     """
 
     if not JOOBLE_API_KEY:
         return []
 
-    # 🔹 Build smart search text
-    search_text = keyword.strip()
-
-    if location:
-        search_text += f" in {location}"
-
-    if country:
-        search_text += f" {country}"
+    # 🔥 CRITICAL FIX:
+    # If user typed "india", "usa", "scotland" → force it as LOCATION
+    search_location = location or country_or_location
 
     payload = {
-        "keywords": search_text,
+        "keywords": keyword,
+        "location": search_location,
         "page": 1,
-        "searchMode": 1,
+        "pageSize": RESULTS_PER_PAGE,
     }
 
     try:
-        response = requests.post(
+        r = requests.post(
             f"{JOOBLE_URL}{JOOBLE_API_KEY}",
             json=payload,
             timeout=15
         )
-        response.raise_for_status()
-        data = response.json()
-    except Exception:
+        r.raise_for_status()
+        data = r.json()
+
+        jobs = []
+        for j in data.get("jobs", []):
+            jobs.append({
+                "title": j.get("title", "No title"),
+                "company": j.get("company", "Unknown"),
+                "location": j.get("location", ""),
+                "link": j.get("link", ""),
+            })
+
+        return jobs
+
+    except Exception as e:
+        print("Jooble error:", e)
         return []
-
-    jobs: List[Dict] = []
-
-    for job in data.get("jobs", [])[:RESULTS_PER_PAGE]:
-        jobs.append({
-            "title": job.get("title", "(no title)"),
-            "company": job.get("company", "(unknown)"),
-            "location": job.get("location", ""),
-            "link": job.get("link", ""),
-        })
-
-    return jobs
