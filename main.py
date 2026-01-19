@@ -16,15 +16,14 @@ from telegram.ext import (
 
 from config import TELEGRAM_BOT_TOKEN, DEFAULT_TZ, DAILY_HOUR, DAILY_MINUTE
 from jobs_api import get_jobs
-from ai_tools import get_ai_tools
-from database import get_user, upsert_user, all_users
-from utils import WELCOME, format_jobs, format_tools
+from database import upsert_user, all_users
+from utils import WELCOME, format_jobs
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("smartify")
 
 
-# ----------------- PARSING (KEY FIX) -----------------
+# ----------------- PARSING -----------------
 
 def parse_free_text(text: str):
     """
@@ -34,22 +33,29 @@ def parse_free_text(text: str):
     - nurse california
     - hotel jobs china
     """
-    text = text.lower().strip()
+    text = (text or "").lower().strip()
 
     # remove filler words
     text = re.sub(r"\b(jobs?|roles?|vacancies?|openings?)\b", "", text)
     text = re.sub(r"\bin\b", "", text)
 
+    # clean spaces
+    text = re.sub(r"\s+", " ", text).strip()
+
     tokens = text.split()
 
     if len(tokens) >= 2:
-        keyword = " ".join(tokens[:-1])
-        location = tokens[-1]
+        keyword = " ".join(tokens[:-1]).strip()
+        location = tokens[-1].strip()
     else:
-        keyword = text
+        keyword = text.strip()
         location = None
 
-    return keyword.strip(), location
+    # fallback
+    if not keyword:
+        keyword = "jobs"
+
+    return keyword, location
 
 
 # ----------------- KEYBOARD -----------------
@@ -60,21 +66,39 @@ def subscribe_keyboard():
     )
 
 
+# ----------------- ERROR HANDLER -----------------
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.exception("Unhandled exception while processing update", exc_info=context.error)
+
+
 # ----------------- COMMANDS -----------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    upsert_user(update.effective_user.id)
+    user_id = update.effective_user.id
+    upsert_user(user_id)
     await update.message.reply_text(
         WELCOME,
         parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
         reply_markup=subscribe_keyboard(),
     )
 
 
 async def text_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Guard: only proceed if we truly have a message text
+    if not update.message or not update.message.text:
+        return
+
+    user_id = update.effective_user.id
     text = update.message.text
+
     keyword, location = parse_free_text(text)
 
+    # ✅ Save last search for daily push
+    upsert_user(user_id, last_keyword=keyword, last_location=location)
+
+    # ✅ Jooble/Jobs API call
     results = get_jobs(keyword=keyword, location=location)
 
     header = f"🔎 <b>Jobs for “{keyword}”</b>"
@@ -85,18 +109,37 @@ async def text_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text(
             header + "\n\nNo results found.",
             parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
             reply_markup=subscribe_keyboard(),
         )
 
     await update.message.reply_text(
         header + "\n\n" + format_jobs(results),
         parse_mode=ParseMode.HTML,
-        reply_markup=subscribe_keyboard(),
         disable_web_page_preview=True,
+        reply_markup=subscribe_keyboard(),
     )
 
 
-async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def subscribe_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    ✅ Button-click subscribe (CallbackQuery)
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    upsert_user(user_id, subscribed=True)
+
+    # Edit the original bot message (best UX)
+    await query.edit_message_reply_markup(reply_markup=None)
+    await query.message.reply_text("✅ You’re subscribed for daily updates!")
+
+
+async def subscribe_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Optional: /subscribe command
+    """
     user_id = update.effective_user.id
     upsert_user(user_id, subscribed=True)
     await update.message.reply_text("✅ You’re subscribed for daily updates!")
@@ -111,23 +154,27 @@ async def push_daily_job(context: ContextTypes.DEFAULT_TYPE):
         if not user.get("subscribed"):
             continue
 
-        keyword = user.get("last_keyword", "jobs")
+        uid = user["user_id"]
+        keyword = user.get("last_keyword") or "jobs"
         location = user.get("last_location")
 
         results = get_jobs(keyword=keyword, location=location)
         if not results:
             continue
 
-        header = f"🔥 <b>Daily Jobs for {keyword}</b>"
+        header = f"🔥 <b>Daily Jobs for “{keyword}”</b>"
         if location:
-            header += f" — {location.title()}"
+            header += f" — <b>{location.title()}</b>"
 
-        await app.bot.send_message(
-            chat_id=user["user_id"],
-            text=header + "\n\n" + format_jobs(results),
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
-        )
+        try:
+            await app.bot.send_message(
+                chat_id=uid,
+                text=header + "\n\n" + format_jobs(results),
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to push to {uid}: {e}")
 
 
 async def on_startup(app):
@@ -135,20 +182,41 @@ async def on_startup(app):
     app.job_queue.run_daily(
         push_daily_job,
         time=dtime(hour=DAILY_HOUR, minute=DAILY_MINUTE, tzinfo=tz),
+        name="daily_push",
     )
+    logger.info(f"Daily push scheduled at {DAILY_HOUR:02d}:{DAILY_MINUTE:02d} {DEFAULT_TZ}")
 
 
 # ----------------- APP -----------------
 
 def run():
+    if not TELEGRAM_BOT_TOKEN:
+        raise SystemExit("TELEGRAM_BOT_TOKEN missing.")
+
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
+    # Error handler (so Railway shows real exceptions)
+    app.add_error_handler(error_handler)
+
+    # Commands
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(subscribe, pattern="subscribe"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_search))
+    app.add_handler(CommandHandler("subscribe", subscribe_cmd))
+
+    # Button click subscribe
+    app.add_handler(CallbackQueryHandler(subscribe_cb, pattern=r"^subscribe$"))
+
+    # ✅ Only private chat free-text searches
+    app.add_handler(
+        MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, text_search)
+    )
 
     app.post_init = on_startup
-    app.run_polling(drop_pending_updates=True)
+
+    # ✅ Only accept what you handle
+    app.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=["message", "callback_query"],
+    )
 
 
 if __name__ == "__main__":
