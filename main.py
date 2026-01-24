@@ -14,14 +14,22 @@ from telegram.ext import (
     filters,
 )
 
-from config import TELEGRAM_BOT_TOKEN, DEFAULT_TZ, DAILY_HOUR, DAILY_MINUTE
+from config import (
+    TELEGRAM_BOT_TOKEN,
+    DEFAULT_TZ,
+    DAILY_HOUR,
+    DAILY_MINUTE,
+    CHANNEL_ID,
+)
+
 from jobs_api import get_jobs
-from database import upsert_user, all_users
+from database import upsert_user, all_users, get_stats
 from utils import WELCOME, format_jobs
+
+# ----------------- LOGGING -----------------
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("smartify")
-
 
 # ----------------- PARSING -----------------
 
@@ -44,14 +52,10 @@ def parse_free_text(text: str):
         keyword = " ".join(parts[:-1])
         location = parts[-1]
     else:
-        keyword = text
+        keyword = text or "jobs"
         location = None
 
-    if not keyword:
-        keyword = "jobs"
-
     return keyword.strip(), location
-
 
 # ----------------- KEYBOARD -----------------
 
@@ -60,12 +64,10 @@ def subscribe_keyboard():
         [[InlineKeyboardButton("🔔 Subscribe for daily updates", callback_data="subscribe")]]
     )
 
-
 # ----------------- ERROR HANDLER -----------------
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.exception("Unhandled exception", exc_info=context.error)
-
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.exception("Unhandled error", exc_info=context.error)
 
 # ----------------- COMMANDS -----------------
 
@@ -80,17 +82,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=subscribe_keyboard(),
     )
 
-
 async def text_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
     user_id = update.effective_user.id
-    text = update.message.text
+    keyword, location = parse_free_text(update.message.text)
 
-    keyword, location = parse_free_text(text)
-
-    # Save last search (for daily push)
+    # Save last search
     upsert_user(
         user_id,
         last_keyword=keyword,
@@ -107,7 +106,6 @@ async def text_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             header + "\n\nNo results found.",
             parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
             reply_markup=subscribe_keyboard(),
         )
         return
@@ -119,7 +117,6 @@ async def text_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=subscribe_keyboard(),
     )
 
-
 async def subscribe_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -127,7 +124,6 @@ async def subscribe_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     upsert_user(user_id, subscribed=True)
 
-    # Try editing button away (safe)
     try:
         await query.edit_message_reply_markup(reply_markup=None)
     except Exception:
@@ -135,12 +131,40 @@ async def subscribe_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.message.reply_text("✅ You’re subscribed for daily updates!")
 
-
 async def subscribe_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    upsert_user(user_id, subscribed=True)
+    upsert_user(update.effective_user.id, subscribed=True)
     await update.message.reply_text("✅ You’re subscribed for daily updates!")
 
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    total, subs = get_stats()
+    await update.message.reply_text(
+        f"📊 <b>Bot Stats</b>\n\n"
+        f"👥 Total users: <b>{total}</b>\n"
+        f"🔔 Subscribers: <b>{subs}</b>",
+        parse_mode=ParseMode.HTML
+    )
+
+# ----------------- CHANNEL POSTING -----------------
+
+async def post_channel_daily(app):
+    if not CHANNEL_ID:
+        return
+
+    results = get_jobs(keyword="jobs", location=None)
+    if not results:
+        return
+
+    text = "🔥 <b>Daily Job Highlights</b>\n\n" + format_jobs(results)
+
+    try:
+        await app.bot.send_message(
+            chat_id=CHANNEL_ID,
+            text=text,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+    except Exception as e:
+        logger.warning(f"Channel post failed: {e}")
 
 # ----------------- DAILY PUSH -----------------
 
@@ -171,8 +195,10 @@ async def push_daily_job(context: ContextTypes.DEFAULT_TYPE):
                 disable_web_page_preview=True,
             )
         except Exception as e:
-            logger.warning(f"Daily push failed for {uid}: {e}")
+            logger.warning(f"Daily DM failed for {uid}: {e}")
 
+    # Post once daily to channel
+    await post_channel_daily(app)
 
 async def on_startup(app):
     tz = ZoneInfo(DEFAULT_TZ)
@@ -182,7 +208,6 @@ async def on_startup(app):
         name="daily_push",
     )
     logger.info(f"Daily push scheduled at {DAILY_HOUR:02d}:{DAILY_MINUTE:02d} {DEFAULT_TZ}")
-
 
 # ----------------- APP -----------------
 
@@ -196,6 +221,7 @@ def run():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("subscribe", subscribe_cmd))
+    app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CallbackQueryHandler(subscribe_cb, pattern=r"^subscribe$"))
 
     app.add_handler(
@@ -208,7 +234,6 @@ def run():
         drop_pending_updates=True,
         allowed_updates=["message", "callback_query"],
     )
-
 
 if __name__ == "__main__":
     run()

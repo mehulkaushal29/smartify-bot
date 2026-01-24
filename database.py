@@ -1,42 +1,58 @@
 from tinydb import TinyDB, Query
+from typing import Optional
 
-db = TinyDB("users_db.json")
+DB_PATH = "users_db.json"
+db = TinyDB(DB_PATH)
 users = db.table("users")
-User = Query()
+
 
 def get_user(user_id: int) -> dict:
-    user = users.get(User.user_id == user_id)
-    if not user:
-        user = {
-            "user_id": user_id,
-            "subscribed": False,
-            "last_keyword": None,
-            "last_location": None,
-            "tz": "Australia/Melbourne"
-        }
-        users.insert(user)
+    q = Query()
+    row = users.get(q.user_id == user_id)
+    if row:
+        return row
+
+    # default user
+    user = {
+        "user_id": user_id,
+        "subscribed": False,
+        "last_keyword": None,
+        "last_location": None,
+    }
+    users.insert(user)
     return user
+
 
 def upsert_user(
     user_id: int,
-    subscribed: bool = None,
-    last_keyword: str = None,
-    last_location: str = None,
-    tz: str = None
+    subscribed: Optional[bool] = None,
+    last_keyword: Optional[str] = None,
+    last_location: Optional[str] = None,
 ):
-    user = get_user(user_id)
-    update = {}
+    q = Query()
+    row = users.get(q.user_id == user_id)
+
+    data = row.copy() if row else {"user_id": user_id}
 
     if subscribed is not None:
-        update["subscribed"] = subscribed
-    if last_keyword:
-        update["last_keyword"] = last_keyword
-    if last_location:
-        update["last_location"] = last_location
-    if tz:
-        update["tz"] = tz
+        data["subscribed"] = subscribed
+    if last_keyword is not None:
+        data["last_keyword"] = last_keyword
+    if last_location is not None:
+        data["last_location"] = last_location
 
-    users.update(update, User.user_id == user_id)
+    if row:
+        users.update(data, q.user_id == user_id)
+    else:
+        users.insert(data)
+
 
 def all_users():
     return users.all()
+
+
+def get_stats():
+    all_u = users.all()
+    total_users = len(all_u)
+    subscribers = sum(1 for u in all_u if u.get("subscribed"))
+    return total_users, subscribers
